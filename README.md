@@ -144,6 +144,18 @@ The `hp_wmi_get_fan_count_userdefine_trigger()` function is called before each s
 | 80% | ~4800 |
 | 100% | ~5200 |
 
+## Related Projects
+
+This repo is part of a set of tools for running the HP Omen Transcend 14 on Linux:
+
+| Repo | Purpose |
+|------|---------|
+| **[hp-omen-trascend-cachyos-patch](https://github.com/MCMike0399/hp-omen-trascend-cachyos-patch)** | Patched `hp-wmi` kernel module — fixes GPU power (35W→65W), enables `platform_profile`, adds manual fan speed control via hwmon. **This repo requires it.** |
+| **[omen-fan-curve](https://github.com/MCMike0399/omen-fan-curve)** (this repo) | Temperature-based fan curve daemon + KDE Plasma 6 widget. Uses the patched module's hwmon `pwm1` interface |
+| **[omen-rgb-keyboard](https://github.com/alessandromrc/omen-rgb-keyboard)** | 4-zone RGB keyboard driver. Coexists with the patched hp-wmi module without conflict |
+
+**Install order:** hp-omen-trascend-cachyos-patch first (kernel module), then this repo (fan daemon + widget).
+
 ## Uninstall
 
 ```bash
