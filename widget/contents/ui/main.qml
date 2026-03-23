@@ -4,24 +4,28 @@ import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
+import org.kde.ksysguard.sensors as Sensors
 
 PlasmoidItem {
     id: root
 
-    property int fan1Rpm: dataProvider.fan1Rpm
-    property int fan2Rpm: dataProvider.fan2Rpm
+    property int fan1Rpm: fan1Sensor.value || 0
+    property int fan2Rpm: fan2Sensor.value || 0
     property int fan1Pct: rpmToPercent(fan1Rpm)
     property int fan2Pct: rpmToPercent(fan2Rpm)
-    property string fanMode: dataProvider.fanMode
-    property real cpuTemp: dataProvider.cpuTemp
-    property real gpuTemp: dataProvider.gpuTemp
+    property real cpuTemp: cpuTempSensor.value || 0
+    property real gpuTemp: gpuTempSensor.value || 0
 
     readonly property int minRpm: 2000
     readonly property int maxRpm: 5200
 
     preferredRepresentation: compactRepresentation
 
-    FanDataProvider { id: dataProvider }
+    // Native KSysGuard sensors — no shell commands needed
+    Sensors.Sensor { id: fan1Sensor; sensorId: "lmsensors/hp-isa-0000/fan1"; updateInterval: 2000 }
+    Sensors.Sensor { id: fan2Sensor; sensorId: "lmsensors/hp-isa-0000/fan2"; updateInterval: 2000 }
+    Sensors.Sensor { id: cpuTempSensor; sensorId: "cpu/all/averageTemperature"; updateInterval: 2000 }
+    Sensors.Sensor { id: gpuTempSensor; sensorId: "gpu/gpu1/temperature"; updateInterval: 2000 }
 
     function rpmToPercent(rpm) {
         if (rpm <= 0) return 0;
@@ -36,18 +40,22 @@ PlasmoidItem {
         return Kirigami.Theme.negativeTextColor;
     }
 
-    // Compact representation (in panel)
+    function tempColor(temp) {
+        if (temp >= 80) return Kirigami.Theme.negativeTextColor;
+        if (temp >= 65) return Kirigami.Theme.neutralTextColor;
+        return Kirigami.Theme.textColor;
+    }
+
+    // Compact representation (panel)
     compactRepresentation: MouseArea {
         id: compactRoot
-
-        Layout.minimumWidth: row.implicitWidth
-        Layout.preferredWidth: row.implicitWidth
-
+        Layout.minimumWidth: compactRow.implicitWidth
+        Layout.preferredWidth: compactRow.implicitWidth
         hoverEnabled: true
         onClicked: root.expanded = !root.expanded
 
         RowLayout {
-            id: row
+            id: compactRow
             anchors.fill: parent
             spacing: Kirigami.Units.smallSpacing
 
@@ -60,20 +68,19 @@ PlasmoidItem {
             PlasmaComponents.Label {
                 text: root.fan1Pct + "%"
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                color: colorForPercent(root.fan1Pct)
+                color: root.colorForPercent(root.fan1Pct)
             }
         }
 
         PlasmaComponents.ToolTip {
             text: "Fan 1: " + root.fan1Rpm + " RPM (" + root.fan1Pct + "%)\n" +
-                  "Fan 2: " + root.fan2Rpm + " RPM (" + root.fan2Pct + "%)\n" +
-                  "Mode: " + root.fanMode +
-                  (root.cpuTemp > 0 ? "\nCPU: " + root.cpuTemp + "°C" : "") +
-                  (root.gpuTemp > 0 ? "\nGPU: " + root.gpuTemp + "°C" : "")
+                  "Fan 2: " + root.fan2Rpm + " RPM (" + root.fan2Pct + "%)" +
+                  (root.cpuTemp > 0 ? "\nCPU: " + Math.round(root.cpuTemp) + "°C" : "") +
+                  (root.gpuTemp > 0 ? "\nGPU: " + Math.round(root.gpuTemp) + "°C" : "")
         }
     }
 
-    // Full representation (expanded popup)
+    // Full representation (popup)
     fullRepresentation: Item {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 16
         Layout.preferredHeight: mainColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
@@ -100,32 +107,8 @@ PlasmoidItem {
                     font.bold: true
                     font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
                 }
-
-                Item { Layout.fillWidth: true }
-
-                Rectangle {
-                    width: modeLabel.implicitWidth + Kirigami.Units.mediumSpacing * 2
-                    height: modeLabel.implicitHeight + Kirigami.Units.smallSpacing
-                    radius: height / 2
-                    color: root.fanMode === "manual" ? Kirigami.Theme.neutralTextColor :
-                           root.fanMode === "max" ? Kirigami.Theme.negativeTextColor :
-                           Kirigami.Theme.positiveTextColor
-                    opacity: 0.2
-
-                    PlasmaComponents.Label {
-                        id: modeLabel
-                        anchors.centerIn: parent
-                        text: root.fanMode.toUpperCase()
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        font.bold: true
-                        color: root.fanMode === "manual" ? Kirigami.Theme.neutralTextColor :
-                               root.fanMode === "max" ? Kirigami.Theme.negativeTextColor :
-                               Kirigami.Theme.positiveTextColor
-                    }
-                }
             }
 
-            // Separator
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
@@ -142,7 +125,6 @@ PlasmoidItem {
 
                     PlasmaComponents.Label {
                         text: "Fan 1"
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                         opacity: 0.8
                     }
                     Item { Layout.fillWidth: true }
@@ -154,38 +136,13 @@ PlasmoidItem {
                     PlasmaComponents.Label {
                         text: root.fan1Pct + "%"
                         font.bold: true
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                        color: colorForPercent(root.fan1Pct)
+                        color: root.colorForPercent(root.fan1Pct)
                     }
                 }
 
                 PlasmaComponents.ProgressBar {
                     Layout.fillWidth: true
-                    from: 0
-                    to: 100
-                    value: root.fan1Pct
-
-                    background: Rectangle {
-                        implicitWidth: parent.width
-                        implicitHeight: 6
-                        radius: 3
-                        color: Kirigami.Theme.backgroundColor
-                        border.color: Kirigami.Theme.separatorColor
-                        border.width: 0.5
-                    }
-
-                    contentItem: Item {
-                        implicitWidth: parent.width
-                        implicitHeight: 6
-
-                        Rectangle {
-                            width: parent.parent.visualPosition * parent.width
-                            height: parent.height
-                            radius: 3
-                            color: colorForPercent(root.fan1Pct)
-                            opacity: 0.8
-                        }
-                    }
+                    from: 0; to: 100; value: root.fan1Pct
                 }
             }
 
@@ -199,7 +156,6 @@ PlasmoidItem {
 
                     PlasmaComponents.Label {
                         text: "Fan 2"
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
                         opacity: 0.8
                     }
                     Item { Layout.fillWidth: true }
@@ -211,42 +167,16 @@ PlasmoidItem {
                     PlasmaComponents.Label {
                         text: root.fan2Pct + "%"
                         font.bold: true
-                        font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
-                        color: colorForPercent(root.fan2Pct)
+                        color: root.colorForPercent(root.fan2Pct)
                     }
                 }
 
                 PlasmaComponents.ProgressBar {
                     Layout.fillWidth: true
-                    from: 0
-                    to: 100
-                    value: root.fan2Pct
-
-                    background: Rectangle {
-                        implicitWidth: parent.width
-                        implicitHeight: 6
-                        radius: 3
-                        color: Kirigami.Theme.backgroundColor
-                        border.color: Kirigami.Theme.separatorColor
-                        border.width: 0.5
-                    }
-
-                    contentItem: Item {
-                        implicitWidth: parent.width
-                        implicitHeight: 6
-
-                        Rectangle {
-                            width: parent.parent.visualPosition * parent.width
-                            height: parent.height
-                            radius: 3
-                            color: colorForPercent(root.fan2Pct)
-                            opacity: 0.8
-                        }
-                    }
+                    from: 0; to: 100; value: root.fan2Pct
                 }
             }
 
-            // Separator
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
@@ -260,7 +190,6 @@ PlasmoidItem {
 
                 ColumnLayout {
                     spacing: 2
-
                     PlasmaComponents.Label {
                         text: "CPU"
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
@@ -270,15 +199,12 @@ PlasmoidItem {
                         text: root.cpuTemp > 0 ? Math.round(root.cpuTemp) + "°C" : "—"
                         font.bold: true
                         font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
-                        color: root.cpuTemp >= 80 ? Kirigami.Theme.negativeTextColor :
-                               root.cpuTemp >= 65 ? Kirigami.Theme.neutralTextColor :
-                               Kirigami.Theme.textColor
+                        color: root.tempColor(root.cpuTemp)
                     }
                 }
 
                 ColumnLayout {
                     spacing: 2
-
                     PlasmaComponents.Label {
                         text: "GPU"
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
@@ -288,9 +214,7 @@ PlasmoidItem {
                         text: root.gpuTemp > 0 ? Math.round(root.gpuTemp) + "°C" : "—"
                         font.bold: true
                         font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
-                        color: root.gpuTemp >= 80 ? Kirigami.Theme.negativeTextColor :
-                               root.gpuTemp >= 65 ? Kirigami.Theme.neutralTextColor :
-                               Kirigami.Theme.textColor
+                        color: root.tempColor(root.gpuTemp)
                     }
                 }
 
@@ -298,25 +222,17 @@ PlasmoidItem {
 
                 ColumnLayout {
                     spacing: 2
-
                     PlasmaComponents.Label {
                         text: "Max"
                         font.pixelSize: Kirigami.Theme.smallFont.pixelSize
                         opacity: 0.6
                     }
                     PlasmaComponents.Label {
-                        text: {
-                            var maxT = Math.max(root.cpuTemp, root.gpuTemp);
-                            return maxT > 0 ? Math.round(maxT) + "°C" : "—";
-                        }
+                        property real maxTemp: Math.max(root.cpuTemp, root.gpuTemp)
+                        text: maxTemp > 0 ? Math.round(maxTemp) + "°C" : "—"
                         font.bold: true
                         font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.2
-                        color: {
-                            var maxT = Math.max(root.cpuTemp, root.gpuTemp);
-                            return maxT >= 80 ? Kirigami.Theme.negativeTextColor :
-                                   maxT >= 65 ? Kirigami.Theme.neutralTextColor :
-                                   Kirigami.Theme.textColor;
-                        }
+                        color: root.tempColor(maxTemp)
                     }
                 }
             }
