@@ -1,19 +1,21 @@
 {
   "curve": [
-    {"temp": 40, "speed": 0},
-    {"temp": 45, "speed": 25},
-    {"temp": 50, "speed": 30},
-    {"temp": 55, "speed": 35},
-    {"temp": 60, "speed": 40},
-    {"temp": 65, "speed": 50},
-    {"temp": 70, "speed": 60},
-    {"temp": 75, "speed": 75},
-    {"temp": 80, "speed": 100}
+    {"temp": 30, "speed": 0},
+    {"temp": 45, "speed": 20},
+    {"temp": 50, "speed": 25},
+    {"temp": 55, "speed": 30},
+    {"temp": 60, "speed": 35},
+    {"temp": 65, "speed": 45},
+    {"temp": 70, "speed": 55},
+    {"temp": 75, "speed": 65},
+    {"temp": 80, "speed": 75},
+    {"temp": 85, "speed": 85},
+    {"temp": 90, "speed": 100}
   ],
   "hysteresis": 2,
   "interval": 2,
   "min_speed": 0,
   "max_speed": 100,
-  "critical_temp": 90,
-  "auto_below": 40
+  "critical_temp": 95,
+  "auto_below": 30
 }

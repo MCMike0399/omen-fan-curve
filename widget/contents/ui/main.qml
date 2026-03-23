@@ -17,6 +17,8 @@ PlasmoidItem {
     property int fan2Pct: 0
     property real cpuTemp: 0
     property real gpuTemp: 0
+    property int pwmValue: 0
+    property bool manualMode: false
 
     readonly property int minRpm: 2000
     readonly property int maxRpm: 5200
@@ -26,6 +28,10 @@ PlasmoidItem {
         if (rpm <= minRpm) return Math.round(rpm / minRpm * 20)
         var pct = Math.round((rpm - minRpm) / (maxRpm - minRpm) * 80 + 20)
         return Math.min(100, Math.max(0, pct))
+    }
+
+    function pwmToPercent(pwm) {
+        return Math.round(pwm / 255 * 100)
     }
 
     function colorForPercent(pct) {
@@ -46,19 +52,28 @@ PlasmoidItem {
         id: dataSource
         engine: "executable"
         connectedSources: [
-            "HP=$(grep -rl '^hp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); CT=$(grep -rl '^coretemp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); echo \"$(cat $HP/fan1_input 2>/dev/null || echo 0),$(cat $HP/fan2_input 2>/dev/null || echo 0),$(cat $CT/temp1_input 2>/dev/null || echo 0),$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo 0)\""
+            "HP=$(grep -rl '^hp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); CT=$(grep -rl '^coretemp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); echo \"$(cat $HP/fan1_input 2>/dev/null || echo 0),$(cat $HP/fan2_input 2>/dev/null || echo 0),$(cat $CT/temp1_input 2>/dev/null || echo 0),$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo 0),$(cat $HP/pwm1 2>/dev/null || echo 0),$(cat $HP/pwm1_enable 2>/dev/null || echo 0)\""
         ]
         interval: 2000
 
         onNewData: function(source, data) {
             var parts = data.stdout.trim().split(",")
-            if (parts.length >= 4) {
+            if (parts.length >= 6) {
                 root.fan1Rpm = parseInt(parts[0]) || 0
                 root.fan2Rpm = parseInt(parts[1]) || 0
                 root.cpuTemp = (parseInt(parts[2]) || 0) / 1000
                 root.gpuTemp = parseFloat(parts[3]) || 0
-                root.fan1Pct = rpmToPercent(root.fan1Rpm)
-                root.fan2Pct = rpmToPercent(root.fan2Rpm)
+                root.pwmValue = parseInt(parts[4]) || 0
+                root.manualMode = (parseInt(parts[5]) === 1)
+
+                if (root.manualMode) {
+                    var pct = pwmToPercent(root.pwmValue)
+                    root.fan1Pct = pct
+                    root.fan2Pct = pct
+                } else {
+                    root.fan1Pct = rpmToPercent(root.fan1Rpm)
+                    root.fan2Pct = rpmToPercent(root.fan2Rpm)
+                }
             }
         }
     }
