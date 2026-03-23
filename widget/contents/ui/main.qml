@@ -3,52 +3,65 @@ import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents
+import org.kde.plasma.plasma5support as Plasma5Support
 import org.kde.kirigami as Kirigami
-import org.kde.ksysguard.sensors as Sensors
 
 PlasmoidItem {
     id: root
 
-    property int fan1Rpm: fan1Sensor.value || 0
-    property int fan2Rpm: fan2Sensor.value || 0
-    property int fan1Pct: rpmToPercent(fan1Rpm)
-    property int fan2Pct: rpmToPercent(fan2Rpm)
-    property real cpuTemp: cpuTempSensor.value || 0
-    property real gpuTemp: gpuTempSensor.value || 0
+    preferredRepresentation: compactRepresentation
+
+    property int fan1Rpm: 0
+    property int fan2Rpm: 0
+    property int fan1Pct: 0
+    property int fan2Pct: 0
+    property real cpuTemp: 0
+    property real gpuTemp: 0
 
     readonly property int minRpm: 2000
     readonly property int maxRpm: 5200
 
-    preferredRepresentation: compactRepresentation
-
-    // Native KSysGuard sensors — no shell commands needed
-    Sensors.Sensor { id: fan1Sensor; sensorId: "lmsensors/hp-isa-0000/fan1"; updateInterval: 2000 }
-    Sensors.Sensor { id: fan2Sensor; sensorId: "lmsensors/hp-isa-0000/fan2"; updateInterval: 2000 }
-    Sensors.Sensor { id: cpuTempSensor; sensorId: "cpu/all/averageTemperature"; updateInterval: 2000 }
-    Sensors.Sensor { id: gpuTempSensor; sensorId: "gpu/gpu1/temperature"; updateInterval: 2000 }
-
     function rpmToPercent(rpm) {
-        if (rpm <= 0) return 0;
-        if (rpm <= minRpm) return Math.round(rpm / minRpm * 20);
-        var pct = Math.round((rpm - minRpm) / (maxRpm - minRpm) * 80 + 20);
-        return Math.min(100, Math.max(0, pct));
+        if (rpm <= 0) return 0
+        if (rpm <= minRpm) return Math.round(rpm / minRpm * 20)
+        var pct = Math.round((rpm - minRpm) / (maxRpm - minRpm) * 80 + 20)
+        return Math.min(100, Math.max(0, pct))
     }
 
     function colorForPercent(pct) {
-        if (pct <= 30) return Kirigami.Theme.positiveTextColor;
-        if (pct <= 60) return Kirigami.Theme.neutralTextColor;
-        return Kirigami.Theme.negativeTextColor;
+        if (pct <= 30) return Kirigami.Theme.positiveTextColor
+        if (pct <= 60) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.negativeTextColor
     }
 
     function tempColor(temp) {
-        if (temp >= 80) return Kirigami.Theme.negativeTextColor;
-        if (temp >= 65) return Kirigami.Theme.neutralTextColor;
-        return Kirigami.Theme.textColor;
+        if (temp >= 80) return Kirigami.Theme.negativeTextColor
+        if (temp >= 65) return Kirigami.Theme.neutralTextColor
+        return Kirigami.Theme.textColor
     }
 
-    // Compact representation (panel)
+    Plasma5Support.DataSource {
+        id: dataSource
+        engine: "executable"
+        connectedSources: [
+            "HP=$(grep -rl '^hp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); CT=$(grep -rl '^coretemp$' /sys/class/hwmon/*/name 2>/dev/null | head -1 | xargs dirname 2>/dev/null); echo \"$(cat $HP/fan1_input 2>/dev/null || echo 0),$(cat $HP/fan2_input 2>/dev/null || echo 0),$(cat $CT/temp1_input 2>/dev/null || echo 0),$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo 0)\""
+        ]
+        interval: 2000
+
+        onNewData: function(source, data) {
+            var parts = data.stdout.trim().split(",")
+            if (parts.length >= 4) {
+                root.fan1Rpm = parseInt(parts[0]) || 0
+                root.fan2Rpm = parseInt(parts[1]) || 0
+                root.cpuTemp = (parseInt(parts[2]) || 0) / 1000
+                root.gpuTemp = parseFloat(parts[3]) || 0
+                root.fan1Pct = rpmToPercent(root.fan1Rpm)
+                root.fan2Pct = rpmToPercent(root.fan2Rpm)
+            }
+        }
+    }
+
     compactRepresentation: MouseArea {
-        id: compactRoot
         Layout.minimumWidth: compactRow.implicitWidth
         Layout.preferredWidth: compactRow.implicitWidth
         hoverEnabled: true
@@ -80,7 +93,6 @@ PlasmoidItem {
         }
     }
 
-    // Full representation (popup)
     fullRepresentation: Item {
         Layout.preferredWidth: Kirigami.Units.gridUnit * 16
         Layout.preferredHeight: mainColumn.implicitHeight + Kirigami.Units.largeSpacing * 2
@@ -91,7 +103,6 @@ PlasmoidItem {
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.mediumSpacing
 
-            // Header
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.smallSpacing
@@ -122,11 +133,7 @@ PlasmoidItem {
 
                 RowLayout {
                     Layout.fillWidth: true
-
-                    PlasmaComponents.Label {
-                        text: "Fan 1"
-                        opacity: 0.8
-                    }
+                    PlasmaComponents.Label { text: "Fan 1"; opacity: 0.8 }
                     Item { Layout.fillWidth: true }
                     PlasmaComponents.Label {
                         text: root.fan1Rpm + " RPM"
@@ -153,11 +160,7 @@ PlasmoidItem {
 
                 RowLayout {
                     Layout.fillWidth: true
-
-                    PlasmaComponents.Label {
-                        text: "Fan 2"
-                        opacity: 0.8
-                    }
+                    PlasmaComponents.Label { text: "Fan 2"; opacity: 0.8 }
                     Item { Layout.fillWidth: true }
                     PlasmaComponents.Label {
                         text: root.fan2Rpm + " RPM"
@@ -191,9 +194,7 @@ PlasmoidItem {
                 ColumnLayout {
                     spacing: 2
                     PlasmaComponents.Label {
-                        text: "CPU"
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        opacity: 0.6
+                        text: "CPU"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize; opacity: 0.6
                     }
                     PlasmaComponents.Label {
                         text: root.cpuTemp > 0 ? Math.round(root.cpuTemp) + "°C" : "—"
@@ -206,9 +207,7 @@ PlasmoidItem {
                 ColumnLayout {
                     spacing: 2
                     PlasmaComponents.Label {
-                        text: "GPU"
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        opacity: 0.6
+                        text: "GPU"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize; opacity: 0.6
                     }
                     PlasmaComponents.Label {
                         text: root.gpuTemp > 0 ? Math.round(root.gpuTemp) + "°C" : "—"
@@ -223,9 +222,7 @@ PlasmoidItem {
                 ColumnLayout {
                     spacing: 2
                     PlasmaComponents.Label {
-                        text: "Max"
-                        font.pixelSize: Kirigami.Theme.smallFont.pixelSize
-                        opacity: 0.6
+                        text: "Max"; font.pixelSize: Kirigami.Theme.smallFont.pixelSize; opacity: 0.6
                     }
                     PlasmaComponents.Label {
                         property real maxTemp: Math.max(root.cpuTemp, root.gpuTemp)
