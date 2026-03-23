@@ -8,7 +8,7 @@
         ],
         "Category": "System Information",
         "Description": "Shows fan speed percentage for HP Omen laptops",
-        "Icon": "sensors-fan",
+        "Icon": "speedometer",
         "Id": "org.kde.plasma.omen-fan-monitor",
         "License": "MIT",
         "Name": "Omen Fan Monitor"

@@ -29,15 +29,17 @@ PlasmoidItem {
     }
 
     function colorForPercent(pct) {
-        if (pct <= 30) return Kirigami.Theme.positiveTextColor
-        if (pct <= 60) return Kirigami.Theme.neutralTextColor
-        return Kirigami.Theme.negativeTextColor
+        // Blue gradient: light blue → medium blue → deep blue
+        if (pct <= 30) return "#7AB8FF"
+        if (pct <= 50) return "#5A9CF0"
+        if (pct <= 70) return "#3D7FDB"
+        return "#2563C4"
     }
 
     function tempColor(temp) {
-        if (temp >= 80) return Kirigami.Theme.negativeTextColor
-        if (temp >= 65) return Kirigami.Theme.neutralTextColor
-        return Kirigami.Theme.textColor
+        if (temp >= 80) return "#2563C4"
+        if (temp >= 65) return "#3D7FDB"
+        return "#7AB8FF"
     }
 
     Plasma5Support.DataSource {
@@ -72,12 +74,6 @@ PlasmoidItem {
             anchors.fill: parent
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.Icon {
-                source: "sensors-fan"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-            }
-
             PlasmaComponents.Label {
                 text: root.fan1Pct + "%"
                 font.pixelSize: Kirigami.Theme.defaultFont.pixelSize
@@ -103,27 +99,17 @@ PlasmoidItem {
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.mediumSpacing
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Kirigami.Units.smallSpacing
-
-                Kirigami.Icon {
-                    source: "sensors-fan"
-                    Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                    Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-                }
-
-                PlasmaComponents.Label {
-                    text: "Omen Fan Monitor"
-                    font.bold: true
-                    font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
-                }
+            PlasmaComponents.Label {
+                text: "Omen Fan Monitor"
+                font.bold: true
+                font.pixelSize: Kirigami.Theme.defaultFont.pixelSize * 1.1
+                color: "#5A9CF0"
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Kirigami.Theme.separatorColor
+                color: Qt.rgba(0.48, 0.72, 1.0, 0.2)
             }
 
             // Fan 1
@@ -183,7 +169,7 @@ PlasmoidItem {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Kirigami.Theme.separatorColor
+                color: Qt.rgba(0.48, 0.72, 1.0, 0.2)
             }
 
             // Temperatures
