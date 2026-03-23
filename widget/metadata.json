@@ -1,0 +1,20 @@
+{
+    "KPlugin": {
+        "Id": "org.kde.plasma.omen-fan-monitor",
+        "Name": "Omen Fan Monitor",
+        "Description": "Shows fan speed percentage for HP Omen laptops",
+        "Category": "System Information",
+        "Icon": "sensors-fan",
+        "Authors": [
+            {
+                "Name": "MCMike0399",
+                "Email": ""
+            }
+        ],
+        "License": "MIT",
+        "Version": "1.0"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml"
+}
