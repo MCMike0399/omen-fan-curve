@@ -1,0 +1,14 @@
+[Unit]
+Description=HP Omen Fan Curve Daemon
+After=multi-user.target
+Wants=nvidia-powerd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/omen-fan-curve run -v
+ExecStop=/usr/local/bin/omen-fan-curve auto
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

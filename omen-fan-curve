@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""
+omen-fan-curve - Temperature-based fan curve daemon for HP Omen laptops.
+
+Controls fan speed via the patched hp-wmi hwmon interface (pwm1).
+Reads CPU (coretemp) and GPU (nvidia-smi) temperatures, uses the higher
+value to look up the target fan speed from a configurable curve, and
+applies it with hysteresis to prevent oscillation.
+
+Requires: patched hp-wmi module with manual fan speed support.
+See: https://github.com/MCMike0399/hp-omen-trascend-cachyos-patch
+"""
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+DEFAULT_CONFIG = "/etc/omen-fan-curve.json"
+
+DEFAULT_CURVE = {
+    "curve": [
+        {"temp": 40, "speed": 0},
+        {"temp": 45, "speed": 25},
+        {"temp": 50, "speed": 30},
+        {"temp": 55, "speed": 35},
+        {"temp": 60, "speed": 40},
+        {"temp": 65, "speed": 50},
+        {"temp": 70, "speed": 60},
+        {"temp": 75, "speed": 75},
+        {"temp": 80, "speed": 100},
+    ],
+    "hysteresis": 2,
+    "interval": 2,
+    "min_speed": 0,
+    "max_speed": 100,
+    "critical_temp": 90,
+    "auto_below": 40,
+}
+
+
+def find_hp_hwmon():
+    """Find the hp-wmi hwmon sysfs path."""
+    for hwmon in Path("/sys/class/hwmon").iterdir():
+        name_file = hwmon / "name"
+        if name_file.exists() and name_file.read_text().strip() == "hp":
+            pwm_enable = hwmon / "pwm1_enable"
+            pwm_input = hwmon / "pwm1"
+            if pwm_enable.exists() and pwm_input.exists():
+                return hwmon
+    return None
+
+
+def find_coretemp_hwmon():
+    """Find the coretemp hwmon sysfs path."""
+    for hwmon in Path("/sys/class/hwmon").iterdir():
+        name_file = hwmon / "name"
+        if name_file.exists() and name_file.read_text().strip() == "coretemp":
+            return hwmon
+    return None
+
+
+def get_cpu_temp(coretemp_path):
+    """Read CPU package temperature from coretemp hwmon."""
+    if not coretemp_path:
+        return None
+    # temp1_input is usually Package id 0
+    temp_file = coretemp_path / "temp1_input"
+    if temp_file.exists():
+        try:
+            return int(temp_file.read_text().strip()) / 1000.0
+        except (ValueError, OSError):
+            pass
+    return None
+
+
+def get_gpu_temp():
+    """Read GPU temperature from nvidia-smi."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=temperature.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            return float(result.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
+        pass
+    return None
+
+
+def interpolate_speed(temp, curve):
+    """Linearly interpolate fan speed from the curve."""
+    if temp <= curve[0]["temp"]:
+        return curve[0]["speed"]
+    if temp >= curve[-1]["temp"]:
+        return curve[-1]["speed"]
+
+    for i in range(len(curve) - 1):
+        t0, s0 = curve[i]["temp"], curve[i]["speed"]
+        t1, s1 = curve[i + 1]["temp"], curve[i + 1]["speed"]
+        if t0 <= temp <= t1:
+            ratio = (temp - t0) / (t1 - t0)
+            return s0 + ratio * (s1 - s0)
+
+    return curve[-1]["speed"]
+
+
+def pct_to_pwm(pct):
+    """Convert percentage (0-100) to hwmon pwm value (0-255)."""
+    return max(0, min(255, int(pct * 255 / 100)))
+
+
+def set_fan_speed(hp_hwmon, speed_pct):
+    """Set fan speed via hwmon. speed_pct=0 means auto mode."""
+    pwm_enable = hp_hwmon / "pwm1_enable"
+    pwm_input = hp_hwmon / "pwm1"
+
+    if speed_pct <= 0:
+        # Auto mode
+        pwm_enable.write_text("2")
+    else:
+        speed_pct = max(1, min(100, int(speed_pct)))
+        pwm_val = pct_to_pwm(speed_pct)
+        # Ensure manual mode is set
+        try:
+            current_mode = pwm_enable.read_text().strip()
+            if current_mode != "1":
+                pwm_enable.write_text("1")
+        except OSError:
+            pwm_enable.write_text("1")
+        pwm_input.write_text(str(pwm_val))
+
+
+def get_fan_rpms(hp_hwmon):
+    """Read current fan RPMs."""
+    rpms = []
+    for i in [1, 2]:
+        fan_file = hp_hwmon / f"fan{i}_input"
+        if fan_file.exists():
+            try:
+                rpms.append(int(fan_file.read_text().strip()))
+            except (ValueError, OSError):
+                rpms.append(0)
+    return rpms
+
+
+def load_config(config_path):
+    """Load configuration from JSON file, or return defaults."""
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                user_config = json.load(f)
+            # Merge with defaults
+            config = DEFAULT_CURVE.copy()
+            config.update(user_config)
+            # Ensure curve is sorted
+            config["curve"] = sorted(config["curve"], key=lambda p: p["temp"])
+            return config
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Warning: Invalid config {config_path}: {e}, using defaults",
+                  file=sys.stderr)
+    return DEFAULT_CURVE.copy()
+
+
+def generate_config(path):
+    """Write default config to a file."""
+    with open(path, "w") as f:
+        json.dump(DEFAULT_CURVE, f, indent=2)
+    print(f"Default config written to {path}")
+
+
+def run_daemon(config, hp_hwmon, coretemp_path, verbose=False):
+    """Main fan control loop."""
+    curve = config["curve"]
+    hysteresis = config["hysteresis"]
+    interval = config["interval"]
+    critical_temp = config["critical_temp"]
+    auto_below = config["auto_below"]
+
+    last_speed = -1
+    last_temp = 0
+
+    def cleanup(signum=None, frame=None):
+        print("\nRestoring auto fan mode...")
+        try:
+            set_fan_speed(hp_hwmon, 0)
+        except OSError:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+
+    print(f"omen-fan-curve started (interval={interval}s, hysteresis={hysteresis}°C)")
+    print(f"Curve: {' → '.join(f'{p['temp']}°C:{p['speed']}%' for p in curve)}")
+    print(f"Critical: {critical_temp}°C → 100%, Auto below: {auto_below}°C")
+    print()
+
+    while True:
+        try:
+            cpu_temp = get_cpu_temp(coretemp_path)
+            gpu_temp = get_gpu_temp()
+
+            temps = [t for t in [cpu_temp, gpu_temp] if t is not None]
+            if not temps:
+                if verbose:
+                    print("No temperature readings, setting auto mode")
+                set_fan_speed(hp_hwmon, 0)
+                time.sleep(interval)
+                continue
+
+            max_temp = max(temps)
+
+            # Critical override
+            if max_temp >= critical_temp:
+                target_speed = 100
+            elif max_temp < auto_below:
+                target_speed = 0
+            else:
+                target_speed = interpolate_speed(max_temp, curve)
+
+            # Apply hysteresis: only decrease speed if temp dropped enough
+            if target_speed < last_speed and max_temp > last_temp - hysteresis:
+                target_speed = last_speed
+
+            target_speed = int(target_speed)
+
+            if target_speed != last_speed:
+                set_fan_speed(hp_hwmon, target_speed)
+                last_speed = target_speed
+
+                if verbose:
+                    rpms = get_fan_rpms(hp_hwmon)
+                    mode = "AUTO" if target_speed == 0 else f"{target_speed}%"
+                    print(f"CPU={cpu_temp:.0f}°C GPU={gpu_temp or 0:.0f}°C "
+                          f"→ {mode} "
+                          f"(Fan1={rpms[0]} Fan2={rpms[1] if len(rpms) > 1 else '?'})")
+
+            elif verbose:
+                rpms = get_fan_rpms(hp_hwmon)
+                mode = "AUTO" if target_speed == 0 else f"{target_speed}%"
+                print(f"CPU={cpu_temp:.0f}°C GPU={gpu_temp or 0:.0f}°C "
+                      f"= {mode} "
+                      f"(Fan1={rpms[0]} Fan2={rpms[1] if len(rpms) > 1 else '?'})")
+
+            last_temp = max_temp
+
+        except OSError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            # Try to restore auto on error
+            try:
+                set_fan_speed(hp_hwmon, 0)
+            except OSError:
+                pass
+            time.sleep(interval * 2)
+            continue
+
+        time.sleep(interval)
+
+
+def status(hp_hwmon, coretemp_path):
+    """Show current status."""
+    cpu_temp = get_cpu_temp(coretemp_path)
+    gpu_temp = get_gpu_temp()
+    rpms = get_fan_rpms(hp_hwmon)
+    pwm_enable = hp_hwmon / "pwm1_enable"
+    mode = pwm_enable.read_text().strip()
+    mode_name = {"0": "full", "1": "manual", "2": "auto"}.get(mode, mode)
+
+    print(f"CPU temp:  {cpu_temp:.0f}°C" if cpu_temp else "CPU temp:  N/A")
+    print(f"GPU temp:  {gpu_temp:.0f}°C" if gpu_temp else "GPU temp:  N/A")
+    print(f"Fan mode:  {mode_name}")
+    print(f"Fan 1:     {rpms[0]} RPM" if rpms else "Fan 1:     N/A")
+    print(f"Fan 2:     {rpms[1]} RPM" if len(rpms) > 1 else "Fan 2:     N/A")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Temperature-based fan curve for HP Omen laptops"
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    run_parser = sub.add_parser("run", help="Run the fan curve daemon")
+    run_parser.add_argument("-v", "--verbose", action="store_true",
+                            help="Print temperature/speed changes")
+    run_parser.add_argument("-c", "--config", default=DEFAULT_CONFIG,
+                            help=f"Config file path (default: {DEFAULT_CONFIG})")
+
+    sub.add_parser("status", help="Show current fan/temp status")
+
+    gen_parser = sub.add_parser("generate-config",
+                                help="Write default config file")
+    gen_parser.add_argument("-o", "--output", default=DEFAULT_CONFIG,
+                            help="Output path")
+
+    set_parser = sub.add_parser("set", help="Manually set fan speed")
+    set_parser.add_argument("speed", type=int,
+                            help="Fan speed 0-100 (0=auto)")
+
+    sub.add_parser("auto", help="Restore automatic fan control")
+
+    args = parser.parse_args()
+
+    if args.command == "generate-config":
+        generate_config(args.output)
+        return
+
+    # Find hwmon devices
+    hp_hwmon = find_hp_hwmon()
+    if not hp_hwmon:
+        print("Error: hp-wmi hwmon device not found. Is the patched module loaded?",
+              file=sys.stderr)
+        sys.exit(1)
+
+    coretemp_path = find_coretemp_hwmon()
+
+    if args.command == "status" or args.command is None:
+        status(hp_hwmon, coretemp_path)
+
+    elif args.command == "set":
+        if os.geteuid() != 0:
+            print("Error: must run as root", file=sys.stderr)
+            sys.exit(1)
+        set_fan_speed(hp_hwmon, args.speed)
+        print(f"Fan speed set to {'auto' if args.speed == 0 else f'{args.speed}%'}")
+
+    elif args.command == "auto":
+        if os.geteuid() != 0:
+            print("Error: must run as root", file=sys.stderr)
+            sys.exit(1)
+        set_fan_speed(hp_hwmon, 0)
+        print("Fan control restored to automatic")
+
+    elif args.command == "run":
+        if os.geteuid() != 0:
+            print("Error: must run as root", file=sys.stderr)
+            sys.exit(1)
+        config = load_config(args.config)
+        run_daemon(config, hp_hwmon, coretemp_path, verbose=args.verbose)
+
+
+if __name__ == "__main__":
+    main()
