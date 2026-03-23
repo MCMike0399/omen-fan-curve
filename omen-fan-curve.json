@@ -1,14 +1,11 @@
 {
   "curve": [
-    {"temp": 30, "speed": 0},
-    {"temp": 45, "speed": 20},
-    {"temp": 50, "speed": 25},
-    {"temp": 55, "speed": 30},
-    {"temp": 60, "speed": 35},
-    {"temp": 65, "speed": 45},
-    {"temp": 70, "speed": 55},
-    {"temp": 75, "speed": 65},
-    {"temp": 80, "speed": 75},
+    {"temp": 50, "speed": 0},
+    {"temp": 60, "speed": 25},
+    {"temp": 65, "speed": 30},
+    {"temp": 70, "speed": 40},
+    {"temp": 75, "speed": 55},
+    {"temp": 80, "speed": 70},
     {"temp": 85, "speed": 85},
     {"temp": 90, "speed": 100}
   ],
@@ -17,5 +14,5 @@
   "min_speed": 0,
   "max_speed": 100,
   "critical_temp": 95,
-  "auto_below": 30
+  "auto_below": 50
 }
